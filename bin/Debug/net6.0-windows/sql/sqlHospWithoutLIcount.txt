@@ -1,0 +1,95 @@
+with temp_table as (select 
+m.num || '-' || substring(m.year from 3) || '-' || m.num_type as "Номер карты"
+, (select d.name
+		from mm.hosp_move_hist mh, mm.dept d
+		where mh.mdoc_id = m.id
+ 		and mh.dept_id = d.id
+		order by mh.in_dt desc fetch first 1 rows only) as "Отделение"
+, to_char(h.hosp_dt, 'dd.mm.yyyy hh24:mi') as "Дата поступления"
+, case when extract(isodow from h.hosp_dt) = 1 then 'Понедельник' 
+	   when extract(isodow from h.hosp_dt) = 2 then 'Вторник' 
+	   when extract(isodow from h.hosp_dt) = 3 then 'Среда' 
+	   when extract(isodow from h.hosp_dt) = 4 then 'Четверг' 
+	   when extract(isodow from h.hosp_dt) = 5 then 'Пятница' 
+	   when extract(isodow from h.hosp_dt) = 6 then 'Суббота' 
+	   when extract(isodow from h.hosp_dt) = 7 then 'Воскресенье' 
+	   else null end as "День недели"
+, case when h.hosp_outcome_id in (5, 6, 15, 16) then to_char(h.leave_dt, 'dd.mm.yyyy hh24:mi') || ' (умер)' else to_char(h.leave_dt, 'dd.mm.yyyy hh24:mi') end as "Дата выписки"
+, ect.dzm56 as "Канал"
+, (select p.surname || ' ' || p.name || coalesce(p.patron, ' ')
+		from mm.hosp_move_hist mh
+		left join mm.emp e on e.id = mh.emp_id
+		left join mm.people p on p.id = e.people_id
+		where mh.mdoc_id = m.id
+		order by mh.in_dt fetch first 1 rows only) as "ФИО первого лечащего врача"
+, (select d.name
+		from mm.hosp_move_hist mh, mm.dept d
+		where mh.mdoc_id = m.id
+ 		and mh.dept_id = d.id
+		order by mh.in_dt fetch first 1 rows only) as "Первое отделение в движении"
+, case when (select '+'
+ 		from 
+		mm.hospdoc h1
+		join mm.mdoc m1 on m1.id = h1.mdoc_id
+		join mm.naz n1 on h1.mdoc_id = n1.mdoc_id and n1.naz_view = 1
+		join mm.naz_action na1 on na1.id = n1.last_action_id
+		join mm.naz_type nt1 on n1.naz_type_id = nt1.id	
+		join mm.naz_type_dir ntd1 on ntd1.id = nt1.naz_type_dir_id
+		join mm.hosp_move_hist hm1 on h1.mdoc_id = hm1.mdoc_id
+		join mm.dept d1 on d1.id = hm1.dept_id
+		--left join mm.pay_type pt1 on pt1.id = m1.pay_type_id
+
+		where 
+		((h1.hosp_dt::date between :dt1 and :dt3) or (h1.hosp_dt <= :dt3 and h1.leave_dt is null))
+		and m1.id = m.id
+		--and h1.hosp_dt = hm1.in_dt
+		and n1.create_dt::date between h1.hosp_dt::date and :dt2
+		and (na1.state_value = 'cancelled' or na1.state_value = 'postponed') -- Отложено
+		and m1.mdoc_type_id <> 3 -- 3 - История болезни ДС
+		and not ntd1.path <@ (select array_agg(path) from mm.naz_type_dir where tags && array['GROUP_PAT'::varchar]) 
+		and d1.profot_otd not in ('09', '80', '81', '54', '70', '36', '61', '97') fetch first 1 rows only) = '+' then 'Да' else '-' end as "Отмена"
+, pt.name as "Тип оплаты"
+, case when (select mh.interrupt_code from mm.hosp_move_hist mh where mh.mdoc_id = m.id order by mh.in_dt desc fetch first 1 rows only) in ('1', '2') then 'Отказался'
+	   when (select mh.interrupt_code from mm.hosp_move_hist mh where mh.mdoc_id = m.id order by mh.in_dt desc fetch first 1 rows only) = '5' and h.hosp_outcome_id in (5, 6, 15, 16) then 'Умер' 
+	   else '-' end as "Тип выписки"
+
+from
+mm.hospdoc h
+join mm.mdoc m on m.id = h.mdoc_id
+join mm.hosp_move_hist hm on h.mdoc_id = hm.mdoc_id
+join mm.dept d on d.id = hm.dept_id
+left join mm.ehr_case ec on h.ehr_case_id = ec.id
+left join mm.ehr_case_title ect on ec.id = ect.caseid
+left join mm.pay_type pt on pt.id = m.pay_type_id
+
+where 
+((h.hosp_dt::date between :dt1 and :dt3) or (h.hosp_dt <= :dt3 and h.leave_dt is null))
+and h.hosp_dt = hm.in_dt
+and m.mdoc_type_id not in (3, 32)
+and d.profot_otd not in ('09', '80', '81', '54', '70', '36', '61', '97')
+and not exists (select null
+ 				from 
+				mm.hospdoc h1
+				join mm.mdoc m1 on m1.id = h1.mdoc_id
+				join mm.naz n1 on h1.mdoc_id = n1.mdoc_id and n1.naz_view = 1 -- ЛИ
+				join mm.naz_action na1 on na1.id = n1.last_action_id
+				join mm.naz_type nt1 on n1.naz_type_id = nt1.id	
+				join mm.naz_type_dir ntd1 on ntd1.id = nt1.naz_type_dir_id
+				join mm.hosp_move_hist hm1 on h1.mdoc_id = hm1.mdoc_id
+				join mm.dept d1 on d1.id = hm1.dept_id
+				--left join mm.pay_type pt1 on pt1.id = m1.pay_type_id
+
+				where 
+				((h1.hosp_dt::date between :dt1 and :dt3) or (h1.hosp_dt <= :dt3 and h1.leave_dt is null))
+				and m1.id = m.id
+				--and h1.hosp_dt = hm1.in_dt
+				and n1.create_dt::date between h1.hosp_dt::date and :dt2
+				and na1.state_value <> 'cancelled' -- Отменено
+				and na1.state_value <> 'postponed' -- Отложено
+				and m1.mdoc_type_id <> 3 -- 3 - История болезни ДС
+				and not ntd1.path <@ (select array_agg(path) from mm.naz_type_dir where tags && array['GROUP_PAT'::varchar]) 
+				and d1.profot_otd not in ('09', '80', '81', '54', '70', '36', '61', '97')))
+					
+				
+select count(*)
+from temp_table tt

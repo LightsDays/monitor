@@ -1,0 +1,24 @@
+select 
+n.create_dt as "Дата создания"
+, n.name as "Наименование назначения"
+, ns.name as "Статус"
+, case when n.naz_extr_id = 1 then 'Экстренно' else 'Планово' end as "Срочность"
+, m.num as "Номер карты"
+, d.name as "Отделение"
+, n.creator_emp_fio as "Автор"
+
+from 
+mm.people p
+left join mm.mdoc m on m.people_id = p.id 
+left join mm.naz n on n.mdoc_id = m.id
+left join mm.naz_state ns on ns.id = n.naz_state_id
+left join mm.hospdoc h on h.mdoc_id = m.id 
+left join mm.dept d on d.id = h.dept_id 
+
+where 
+n.name like 'Прижиз%'
+and n.create_dt between :dt1 and :dt3
+and n.naz_extr_id = 1
+and ns.name <> 'Выполнено'
+
+order by n.create_dt desc

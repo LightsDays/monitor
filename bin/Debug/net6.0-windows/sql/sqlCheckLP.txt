@@ -1,0 +1,22 @@
+select 
+m.num || '-' || right(m.year,2) || '-' || coalesce(m.num_type, '') as "ИБ"
+, nm.creator_emp_str as "ФИО автора"
+, d.name as "Отделение автора"
+, p.name as "Должность автора"
+, (mm.naz_med_get_drug_name(nm.id)|| ' ' ||chr(13)|| ' ' || mm.naz_med_get_complex_info(nm.id,1::smallint,0::smallint)) as "Медикамент"
+, to_char(nm.start_dt, 'dd.mm.yyyy hh24:mi') as "Дата начала"
+, to_char(nm.end_dt, 'dd.mm.yyyy hh24:mi') as "Дата окончания"
+, to_char(nm.create_dt, 'dd.mm.yyyy hh24:mi') as "Дата создания"
+
+from 
+mm.hospdoc h
+join mm.mdoc m on m.id = h.mdoc_id 
+join mm.naz_med nm on nm.ehr_case_id = h.ehr_case_id
+join mm.emp e on e.id = nm.creator_emp_id
+join mm.dept d on d.id = e.dept_id
+join mm.post p on p.id = e.post_id
+
+where m.num || '-' || right(m.year,2) || '-' || coalesce(m.num_type, '') ilike :ibnum
+
+order by "ИБ"
+,"Медикамент"
